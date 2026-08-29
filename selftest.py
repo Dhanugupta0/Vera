@@ -275,7 +275,10 @@ def main() -> int:
     print(f"    {D}{body}{RS}")
     low = body.lower()
     qualifying = ["would you", "do you", "can you tell", "what if", "how about"]
-    actioning = ["done", "sending", "draft", "here", "confirm", "proceed", "next", "starting", "on it"]
+    # The bot answers in the merchant's language, so the action verbs it switches
+    # to may be Hindi. This list only ever passed on the English token "confirm".
+    actioning = ["done", "sending", "draft", "here", "confirm", "proceed", "next", "starting", "on it",
+                 "shuru", "kar rahi hoon", "kar rahi", "bhej", "bana rahi", "live kar"]
     check("commitment produces a send", out.get("action") == "send")
     check("reply switches to action verbs", any(w in low for w in actioning), body[:120])
     check("reply contains no fresh qualifying question",
