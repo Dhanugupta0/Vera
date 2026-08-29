@@ -1,0 +1,26 @@
+# Render blueprint. Deploy with: render.com -> New -> Blueprint -> point at this repo.
+services:
+  - type: web
+    name: smoothoperator-vera
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # Single worker on purpose: context and conversation state live in-process.
+    startCommand: uvicorn vera.app:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 65
+    healthCheckPath: /v1/healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.6"
+      - key: VERA_STATE_PATH
+        value: /tmp/vera_state.json
+      # Set this to the service's own https URL after the first deploy. The free
+      # plan idles a service out after ~15 min of no traffic, which would drop
+      # every context the judge pushed during warmup.
+      - key: VERA_PUBLIC_URL
+        sync: false
+      - key: VERA_TEAM_NAME
+        sync: false
+      - key: VERA_TEAM_MEMBERS
+        sync: false
+      - key: VERA_CONTACT_EMAIL
+        sync: false

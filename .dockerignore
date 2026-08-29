@@ -1,0 +1,8 @@
+dataset/
+examples/
+__pycache__/
+*.pyc
+.git/
+*.md
+selftest.py
+judge_simulator.py

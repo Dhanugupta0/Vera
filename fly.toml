@@ -1,0 +1,30 @@
+# Fly.io config. Deploy with: fly launch --no-deploy && fly deploy
+app = "smoothoperator-vera"
+primary_region = "bom"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  VERA_STATE_PATH = "/tmp/vera_state.json"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Never auto-stop: the bot must hold the judge's pushed context in memory
+  # for the whole test window.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/v1/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
