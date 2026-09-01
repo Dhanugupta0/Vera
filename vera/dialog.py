@@ -264,6 +264,15 @@ class Brain:
 
     def _on_question(self, conv, mem, verdict, ctx, message) -> dict:
         voice: Voice = ctx["voice"]
+        
+        # Try LLM for a natural answer
+        llm_result = self._try_llm_reply(ctx, conv, message)
+        if llm_result:
+            return {"action": "send", "body": llm_result["body"],
+                    "cta": llm_result.get("cta", "binary_confirm_cancel"),
+                    "rationale": f"Merchant asked a question. LLM-composed answer from pushed contexts. {llm_result.get('rationale', '')}"}
+        
+        # Fallback: deterministic answer
         answer = self._answer_from_context(ctx, message)
         plan = self._action_plan(ctx, conv)
         if answer:
@@ -345,6 +354,15 @@ class Brain:
     def _on_unknown(self, conv, mem, verdict, ctx, message) -> dict:
         if conv.mode == "action":
             return self._on_commitment(conv, mem, verdict, ctx, message)
+        
+        # Try LLM for a context-appropriate response
+        llm_result = self._try_llm_reply(ctx, conv, message)
+        if llm_result:
+            return {"action": "send", "body": llm_result["body"],
+                    "cta": llm_result.get("cta", "binary_confirm_cancel"),
+                    "rationale": f"Reply did not match a known intent. LLM-composed response grounded in pushed contexts. {llm_result.get('rationale', '')}"}
+        
+        # Fallback: deterministic
         voice: Voice = ctx["voice"]
         plan = self._action_plan(ctx, conv)
         body = voice.say(bi(f"{plan['doing']} {plan['confirm']}",
@@ -523,6 +541,31 @@ class Brain:
             return voice.say(bi(f"Short version: {led.get('digest_title')}.",
                                 f"Chhoti baat: {led.get('digest_title')}."))
         return ""
+
+    def _try_llm_reply(self, ctx: dict, conv: Conversation, message: str) -> dict | None:
+        """Attempt LLM-powered reply. Returns dict with body/cta/rationale or None."""
+        try:
+            from .llm import compose_reply_with_llm
+        except ImportError:
+            return None
+        
+        led = ctx["led"]
+        merchant = ctx.get("merchant") or {}
+        category = ctx.get("category") or {}
+        customer = ctx.get("customer") if ctx.get("to_customer") else None
+        voice: Voice = ctx["voice"]
+        addressee = led.get("addressee") or led.get("biz") or ""
+        
+        return compose_reply_with_llm(
+            led=led,
+            merchant=merchant,
+            category=category,
+            customer=customer,
+            conversation_turns=conv.turns,
+            merchant_message=message,
+            voice_mode=voice.mode,
+            addressee=addressee,
+        )
 
     def _answer_from_context(self, ctx: dict, message: str) -> str:
         """Answer only what the pushed contexts actually contain."""

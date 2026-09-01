@@ -8,16 +8,23 @@ TEAM_MEMBERS = [m.strip() for m in os.getenv("VERA_TEAM_MEMBERS", "Dhanu Gupta")
 CONTACT_EMAIL = os.getenv("VERA_CONTACT_EMAIL", "dhanugupta.dev@gmail.com")
 SUBMITTED_AT = os.getenv("VERA_SUBMITTED_AT", "2026-08-28T00:00:00Z")
 
-MODEL = os.getenv("VERA_MODEL", "deterministic-grounded-composer/1.0 (no LLM in hot path)")
+MODEL = os.getenv("VERA_MODEL", "groq/openai-gpt-oss-120b + fact-ledger-grounded-composer/2.0")
 APPROACH = (
-    "Fact-Ledger grounded composer: every context push is distilled into an auditable "
-    "ledger of verifiable facts (raw + derived peer-gap arithmetic). A per-trigger-kind "
-    "playbook selects facts and renders a WhatsApp turn; a guard rejects any numeral, "
-    "URL, category taboo or internal identifier not licensed by the ledger. Replies run "
+    "LLM-assisted grounded composer: every context push is distilled into an auditable "
+    "ledger of verifiable facts (raw + derived peer-gap arithmetic). The LLM composes "
+    "natural, category-voice-matched messages using ONLY ledger-sourced facts, with "
+    "deterministic template playbooks as fallback. A guard rejects any numeral, URL, "
+    "category taboo or internal identifier not licensed by the ledger. Replies run "
     "through a priority intent router (opt-out > hostile > auto-reply > commitment > ...) "
-    "with cross-conversation auto-reply fingerprinting. Zero LLM calls in the request "
-    "path: p99 under 15ms, fully deterministic."
+    "with cross-conversation auto-reply fingerprinting. LLM calls via Groq for natural "
+    "language variety; template fallback ensures p99 under 15ms when LLM is unavailable."
 )
+
+# --- LLM configuration (Groq API) -----------------------------------------
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+LLM_ENABLED = os.getenv("VERA_LLM_ENABLED", "true").lower() in ("true", "1", "yes")
+LLM_TIMEOUT = int(os.getenv("VERA_LLM_TIMEOUT", "8"))
 
 # --- policy tunables -------------------------------------------------------
 MAX_ACTIONS_PER_TICK = 20          # hard cap from the testing brief

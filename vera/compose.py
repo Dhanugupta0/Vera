@@ -1,7 +1,8 @@
-"""Composition orchestrator: bundle -> ledger -> playbook -> guard -> action."""
+"""Composition orchestrator: bundle → ledger → LLM/playbook → guard → action."""
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -10,6 +11,8 @@ from .derive import build_ledger
 from .guard import finalize
 from .lang import customer_voice, merchant_voice, stable_seed
 from .playbooks import P, Draft
+
+log = logging.getLogger("vera.compose")
 
 
 @dataclass
@@ -103,7 +106,8 @@ def _template_params(draft: Draft, addressee: str, led) -> list[str]:
     return params[:5]
 
 
-def _rationale(bundle: dict, draft: Draft, led, voice, issues: list[str], facts: list[str]) -> str:
+def _rationale(bundle: dict, draft: Draft, led, voice, issues: list[str], facts: list[str],
+               llm_rationale: str = "") -> str:
     trigger = bundle.get("trigger") or {}
     kind = trigger.get("kind", "unknown")
     urgency = trigger.get("urgency", "?")
@@ -114,6 +118,8 @@ def _rationale(bundle: dict, draft: Draft, led, voice, issues: list[str], facts:
         f"Trigger {kind} (source={src}, urgency={urgency}) is the reason to message now, and the "
         f"opening sentence states it explicitly.",
     ]
+    if llm_rationale:
+        bits.append(f"Composition rationale: {llm_rationale}")
     if facts:
         bits.append("Grounded on " + "; ".join(facts[:4]) + ".")
     if led.notes:
@@ -155,6 +161,35 @@ def _facts_used(body: str, led) -> list[str]:
     return used[:8]
 
 
+# ---------------------------------------------------------------------------
+# LLM-first composition with template fallback
+# ---------------------------------------------------------------------------
+
+def _try_llm_compose(led, trigger, merchant, category, customer, voice, is_customer_msg):
+    """Attempt LLM composition. Returns (body, cta, rationale, send_as) or None."""
+    try:
+        from .llm import compose_with_llm
+    except ImportError:
+        return None
+    
+    addressee = led.get("addressee") or led.get("biz")
+    result = compose_with_llm(
+        led=led,
+        trigger=trigger,
+        merchant=merchant,
+        category=category,
+        customer=customer if is_customer_msg else None,
+        voice_mode=voice.mode,
+        addressee=addressee or "",
+    )
+    
+    if result and result.get("body"):
+        log.info("LLM composed %d chars for trigger %s", 
+                 len(result["body"]), trigger.get("kind", "?"))
+        return result
+    return None
+
+
 def compose(bundle: dict, now: datetime | None = None, attempt: int = 0,
             fresh_digest_ids: set[str] | None = None) -> Composed | None:
     trigger = bundle.get("trigger") or {}
@@ -176,6 +211,49 @@ def compose(bundle: dict, now: datetime | None = None, attempt: int = 0,
     voice = (customer_voice(customer or {}, merchant, seed) if is_customer_msg
              else merchant_voice(merchant, category, seed))
 
+    addressee = led.get("addressee") or led.get("biz")
+    taboo = led.val("voice_taboo", []) or []
+    llm_rationale = ""
+
+    # ---- Path A: LLM composition (primary, attempt 0 only) ----
+    if attempt == 0:
+        llm_result = _try_llm_compose(led, trigger, merchant, category, customer, voice, is_customer_msg)
+        if llm_result:
+            body = llm_result["body"]
+            cta = llm_result["cta"]
+            send_as = llm_result.get("send_as", "vera")
+            llm_rationale = llm_result.get("rationale", "")
+            
+            # Run through the guard — same rules as template path
+            body, issues = finalize(body, led, taboo)
+            if body and len(body) >= 40:
+                suppression = trigger.get("suppression_key") or \
+                    f"{trigger.get('kind', 'trigger')}:{merchant_id}:{trigger_id}"
+                facts = _facts_used(body, led)
+                
+                # Build a minimal Draft for rationale generation
+                draft = Draft(hook=body, cta=cta, send_as=send_as,
+                              levers=("specificity", "loss_aversion", "engagement"))
+                
+                return Composed(
+                    body=body,
+                    cta=cta,
+                    send_as=send_as,
+                    suppression_key=suppression,
+                    rationale=_rationale(bundle, draft, led, voice, issues, facts, llm_rationale),
+                    template_name="llm_composed_v1",
+                    template_params=[addressee or "", body[:400]],
+                    trigger_id=trigger_id,
+                    merchant_id=merchant_id,
+                    customer_id=(customer or {}).get("customer_id") if send_as == "merchant_on_behalf" else None,
+                    levers=draft.levers,
+                    issues=issues + ["llm_composed"],
+                    facts_used=facts,
+                )
+            else:
+                log.warning("LLM output rejected by guard, falling back to template")
+
+    # ---- Path B: Template playbook (fallback) ----
     p = P(led=led, voice=voice, trigger=trigger, merchant=merchant, category=category,
           customer=customer, seed=seed)
     draft = playbooks.select(trigger)(p)
@@ -188,9 +266,7 @@ def compose(bundle: dict, now: datetime | None = None, attempt: int = 0,
         # never claim to speak for the merchant without a consented customer
         return None
 
-    addressee = led.get("addressee") or led.get("biz")
     body = _assemble(draft, addressee, led)
-    taboo = led.val("voice_taboo", []) or []
     body, issues = finalize(body, led, taboo)
     if not body or len(body) < 40:
         return None
@@ -227,3 +303,4 @@ def compose_unique(bundle: dict, seen: set[str], now: datetime | None = None,
         if result.digest() not in seen:
             return result
     return None
+
