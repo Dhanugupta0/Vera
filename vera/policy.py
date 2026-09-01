@@ -82,6 +82,9 @@ def _conversation_id(brain, merchant_id: str, trigger_id: str) -> str:
 
 def plan_tick(store, brain, now: datetime, available_triggers: list[str]) -> tuple[list[dict], list[str]]:
     """Returns (actions, skip_log)."""
+    from .compose import _llm_tick_budget
+    _llm_tick_budget.remaining = 1  # at most 1 LLM call per tick
+    
     skips: list[str] = []
     trigger_ids = [t for t in (available_triggers or []) if isinstance(t, str)]
     if not trigger_ids:

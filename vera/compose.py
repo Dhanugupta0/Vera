@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -13,6 +14,9 @@ from .lang import customer_voice, merchant_voice, stable_seed
 from .playbooks import P, Draft
 
 log = logging.getLogger("vera.compose")
+
+# Budget tracker to ensure we don't exceed the judge timeout with multiple LLM calls per tick
+_llm_tick_budget = threading.local()
 
 
 @dataclass
@@ -167,6 +171,10 @@ def _facts_used(body: str, led) -> list[str]:
 
 def _try_llm_compose(led, trigger, merchant, category, customer, voice, is_customer_msg):
     """Attempt LLM composition. Returns (body, cta, rationale, send_as) or None."""
+    budget = getattr(_llm_tick_budget, 'remaining', 1)
+    if budget <= 0:
+        return None
+        
     try:
         from .llm import compose_with_llm
     except ImportError:
@@ -184,6 +192,7 @@ def _try_llm_compose(led, trigger, merchant, category, customer, voice, is_custo
     )
     
     if result and result.get("body"):
+        _llm_tick_budget.remaining = budget - 1
         log.info("LLM composed %d chars for trigger %s", 
                  len(result["body"]), trigger.get("kind", "?"))
         return result
